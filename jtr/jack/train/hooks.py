@@ -329,7 +329,8 @@ class XQAEvalHook(EvalHook):
     def __init__(self, reader: JTReader, dataset: List[Tuple[QASetting, List[Answer]]],
                  iter_interval=None, epoch_interval=1, metrics=None, summary_writer=None,
                  write_metrics_to=None, info="", side_effect=None, **kwargs):
-        ports = [FlatPorts.Prediction.answer_span, FlatPorts.Target.answer_span, FlatPorts.Input.answer2question]
+        ports = [FlatPorts.Prediction.answer_span, FlatPorts.Target.answer_span, FlatPorts.Input.answer2question, Ports.Input.question, Ports.Input.sample_id]
+        self.test_time=False
         super().__init__(reader, dataset, ports, iter_interval, epoch_interval, metrics, summary_writer,
                          write_metrics_to, info, side_effect)
 
@@ -347,6 +348,8 @@ class XQAEvalHook(EvalHook):
         correct_spans = tensors[FlatPorts.Target.answer_span]
         predicted_spans = tensors[FlatPorts.Prediction.answer_span]
         correct2prediction = tensors[FlatPorts.Input.answer2question]
+        q_ids = tensors[Ports.Input.question]
+        sample_ids = tensors[Ports.Input.sample_id]
 
         def len_np_or_list(v):
             if isinstance(v, list):
@@ -362,6 +365,12 @@ class XQAEvalHook(EvalHook):
             p_start, p_end = predicted_spans[i][0], predicted_spans[i][1]
             while k < len_np_or_list(correct_spans) and correct2prediction[k] == i:
                 c_start, c_end = correct_spans[k][0], correct_spans[k][1]
+                if self.test_time:
+                    q=""
+                    for qt in q_ids[k]:
+                        qs=self.reader.shared_resources.vocab.get_sym(qt)
+                        q=q+(qs if qs is not None else "<UNK>")+" "
+                    print(sample_ids[k],q,c_start,c_end,p_start,p_end,sep="\t")
                 if p_start == c_start and p_end == c_end:
                     f1 = 1.0
                     exact = 1.0
@@ -380,6 +389,10 @@ class XQAEvalHook(EvalHook):
             acc_exact += exact
 
         return {"f1": acc_f1, "exact": acc_exact}
+    
+    def at_test_time(self,epoch):
+        self.test_time=True
+        self.__call__(epoch)
 
 class ClassificationEvalHook(EvalHook):
     def __init__(self, reader: JTReader, dataset: List[Tuple[QASetting, List[Answer]]],

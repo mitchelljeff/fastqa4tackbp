@@ -59,7 +59,8 @@ class FastQAInputModule(InputModule):
                 XQAPorts.correct_start_training, XQAPorts.answer2question_training,
                 XQAPorts.keep_prob, XQAPorts.is_eval,
                 # for output module
-                XQAPorts.token_char_offsets]
+                XQAPorts.token_char_offsets,
+                Ports.Input.question]
 
     @property
     def training_ports(self) -> List[TensorPort]:
@@ -68,7 +69,7 @@ class FastQAInputModule(InputModule):
     def dataset_generator(self, dataset: List[Tuple[QASetting, List[Answer]]], is_eval: bool) \
             -> Iterable[Mapping[TensorPort, np.ndarray]]:
         q_tokenized, q_ids, q_lengths, s_tokenized, s_ids, s_lengths, \
-        word_in_question, token_offsets, answer_spans = \
+        word_in_question, token_offsets, answer_spans, sample_ids = \
             prepare_data(dataset, self.vocab, self.config.get("lowercase", False), with_answers=True,
                          max_support_length=self.config.get("max_support_length", None))
 
@@ -86,6 +87,8 @@ class FastQAInputModule(InputModule):
                 spans = list()
                 span2question = []
                 offsets = []
+                batchqs = []
+                samp_ids= []
 
                 unique_words, unique_word_lengths, question2unique, support2unique = \
                     unique_words_with_chars(q_tokenized, s_tokenized, self.char_vocab, todo[:self.batch_size])
@@ -96,6 +99,8 @@ class FastQAInputModule(InputModule):
                     for k in range(len(support)):
                         emb_supports[i, k] = self._get_emb(support[k])
                     question = q_ids[j]
+                    batchqs.append(question)
+                    samp_ids.append(sample_ids[j])
                     for k in range(len(question)):
                         emb_questions[i, k] = self._get_emb(question[k])
                     support_lengths.append(s_lengths[j])
@@ -122,13 +127,16 @@ class FastQAInputModule(InputModule):
                     XQAPorts.answer2question_training: [] if is_eval else span2question,
                     XQAPorts.keep_prob: 1.0 if is_eval else 1 - self.dropout,
                     XQAPorts.is_eval: is_eval,
-                    XQAPorts.token_char_offsets: offsets
+                    XQAPorts.token_char_offsets: offsets,
+                    Ports.Input.question: batchqs,
+                    Ports.Input.sample_id: samp_ids
                 }
 
                 # we can only numpify in here, because bucketing is not possible prior
                 batch = numpify(output, keys=[XQAPorts.unique_word_chars,
                                               XQAPorts.question_words2unique, XQAPorts.support_words2unique,
-                                              XQAPorts.word_in_question, XQAPorts.token_char_offsets])
+                                              XQAPorts.word_in_question, XQAPorts.token_char_offsets,
+                                              Ports.Input.question])
                 todo = todo[self.batch_size:]
                 yield batch
 
@@ -163,12 +171,14 @@ class FastQAInputModule(InputModule):
             XQAPorts.emb_question: emb_questions,
             XQAPorts.question_length: q_lengths,
             XQAPorts.word_in_question: word_in_question,
-            XQAPorts.token_char_offsets: token_offsets
+            XQAPorts.token_char_offsets: token_offsets,
+            Ports.Input.question: q_ids
         }
 
         output = numpify(output, keys=[XQAPorts.unique_word_chars, XQAPorts.question_words2unique,
                                        XQAPorts.support_words2unique, XQAPorts.word_in_question,
-                                       XQAPorts.token_char_offsets])
+                                       XQAPorts.token_char_offsets,
+                                       Ports.Input.question])
 
         return output
 

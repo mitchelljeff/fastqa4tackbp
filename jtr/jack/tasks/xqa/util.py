@@ -30,7 +30,7 @@ def prepare_data(dataset, vocab, lowercase=False, with_answers=False, wiq_conten
     else:
         thistokenize = tokenize
 
-    corpus = {"support": [], "question": []}
+    corpus = {"support": [], "question": [], "id": []}
     for d in dataset:
         if isinstance(d, QASetting):
             qa_setting = d
@@ -43,6 +43,8 @@ def prepare_data(dataset, vocab, lowercase=False, with_answers=False, wiq_conten
         else:
             corpus["support"].append(" ".join(qa_setting.support))
             corpus["question"].append(qa_setting.question)
+        corpus["id"].append(qa_setting.id)
+        assert qa_setting.id != None
 
     corpus_tokenized = deep_map(corpus, thistokenize, ['question', 'support'])
 
@@ -130,7 +132,7 @@ def prepare_data(dataset, vocab, lowercase=False, with_answers=False, wiq_conten
 
     return corpus_tokenized["question"], corpus_ids["question"], question_lengths, \
            corpus_tokenized["support"], corpus_ids["support"], support_lengths, \
-           word_in_question, token_offsets, answer_spans
+           word_in_question, token_offsets, answer_spans, corpus["id"]
 
 
 def unique_words_with_chars(q_tokenized, s_tokenized, char_vocab, indices=None, char_limit=20):
