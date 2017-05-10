@@ -365,11 +365,11 @@ class XQAEvalHook(EvalHook):
             p_start, p_end = predicted_spans[i][0], predicted_spans[i][1]
             while k < len_np_or_list(correct_spans) and correct2prediction[k] == i:
                 c_start, c_end = correct_spans[k][0], correct_spans[k][1]
-                if self.test_time:
+                if False and self.test_time:
                     q=""
                     for qt in q_ids[k]:
                         qs=self.reader.shared_resources.vocab.get_sym(qt)
-                        q=q+(qs if qs is not None else "<UNK>")+" "
+                        q=q+(str(qs) if qs is not None else "<UNK>")+" "
                     print(sample_ids[k],q,c_start,c_end,p_start,p_end,sep="\t")
                 if p_start == c_start and p_end == c_end:
                     f1 = 1.0
