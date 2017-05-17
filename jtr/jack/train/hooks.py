@@ -331,6 +331,7 @@ class XQAEvalHook(EvalHook):
                  write_metrics_to=None, info="", side_effect=None, **kwargs):
         ports = [FlatPorts.Prediction.answer_span, FlatPorts.Target.answer_span, FlatPorts.Input.answer2question, Ports.Input.question, Ports.Input.sample_id]
         self.test_time=False
+        self.out_pred=open(reader.shared_resources.config["out_pred"],"w")
         super().__init__(reader, dataset, ports, iter_interval, epoch_interval, metrics, summary_writer,
                          write_metrics_to, info, side_effect)
 
@@ -365,12 +366,12 @@ class XQAEvalHook(EvalHook):
             p_start, p_end = predicted_spans[i][0], predicted_spans[i][1]
             while k < len_np_or_list(correct_spans) and correct2prediction[k] == i:
                 c_start, c_end = correct_spans[k][0], correct_spans[k][1]
-                if False and self.test_time:
+                if self.test_time:
                     q=""
                     for qt in q_ids[k]:
                         qs=self.reader.shared_resources.vocab.get_sym(qt)
                         q=q+(str(qs) if qs is not None else "<UNK>")+" "
-                    print(sample_ids[k],q,c_start,c_end,p_start,p_end,sep="\t")
+                    self.out_pred.write("\t".join([sample_ids[k],q,str(c_start),str(c_end),str(p_start),str(p_end)])+"\n")
                 if p_start == c_start and p_end == c_end:
                     f1 = 1.0
                     exact = 1.0

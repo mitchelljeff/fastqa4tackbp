@@ -129,6 +129,7 @@ def main():
     parser.add_argument('--prune', default='False',
                         help='If the vocabulary should be pruned to the most frequent words.')
     parser.add_argument('--model_dir', default='/tmp/jtreader', type=str, help="Directory to write reader to.")
+    parser.add_argument('--out_pred', default='out_pred.txt', type=str, help="File to write predictions to.")
     parser.add_argument('--log_interval', default=100, type=int, help="interval for logging eta, training loss, etc.")
     parser.add_argument('--device', default='/cpu:0', type=str, help='device setting for tensorflow')
     parser.add_argument('--lowercase', action='store_true', help='lowercase texts.')
