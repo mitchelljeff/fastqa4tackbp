@@ -789,8 +789,13 @@ class JTReader:
         self.input_module.setup_from_data(data)
         self.model_module.setup(self.is_train)
         self.output_module.setup()
+#        self.sess.run([v.initializer for v in self.model_module.variables])
+        new_variables_list=['slot_embeddings',"slot_question_attention/weights"]
+#        old_variables_list = [v for v in self.model_module.variables if v.name.split(":")[0] not in new_variables_list]
+        old_variables_list = [v for v in self.model_module.variables if v not in new_variables_list]
+        saver = tf.train.Saver(old_variables_list)
         self.sess.run([v.initializer for v in self.model_module.variables])
-
+        saver.restore(self.sess, "/Users/apple/Downloads/project_2/fastqa/model_module")
     def setup_from_file(self, dir):
         """
         Sets up already stored reader from model directory.

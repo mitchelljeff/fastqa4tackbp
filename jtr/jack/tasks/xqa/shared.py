@@ -57,7 +57,9 @@ class XQAPorts:
     # ports used during training
     answer2question = FlatPorts.Input.answer2question
     answer_span = FlatPorts.Target.answer_span
-
+    slot_list = TensorPort(tf.int32, [None], "slot_list",
+                                   "Represents TAC slot as integer",
+                                   "[batch_size]")
 
 
 

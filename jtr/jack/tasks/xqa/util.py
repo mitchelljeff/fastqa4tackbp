@@ -3,8 +3,13 @@ import re
 
 from jtr.jack.data_structures import QASetting
 from jtr.preprocess.map import deep_map
-
+from scipy.spatial.distance import cosine
+import numpy as np
+#import gensim
+#from gensim.models.word2vec import LineSentence
+#from gensim.models.word2vec import Word2Vec
 __pattern = re.compile('\w+|[^\w\s]')
+
 
 
 def tokenize(text):
@@ -20,9 +25,20 @@ def token_to_char_offsets(text, tokenized_text):
         offset += len(t)
     return offsets
 
+def max_similarity(lkup,token,q,default_vec):
+    def get_emb(idx):
+        if idx < lkup.shape[0]:
+            return lkup[idx]
+        else:
+            return default_vec
+    max_sim=max([cosine(get_emb(token), get_emb(x)) for x in q])
+    return max_sim
 
 def prepare_data(dataset, vocab, lowercase=False, with_answers=False, wiq_contentword=False,
                  with_spacy=False, max_support_length=-1):
+    #sentences = LineSentence('/home/jemitche/Desktop/wiki/text8')
+    #model = Word2Vec(sentences, size=300, window=5, min_count=5, workers=4)
+    default_vec = np.zeros([vocab.emb_length])
     if with_spacy:
         import spacy
         nlp = spacy.load("en", parser=False)
@@ -30,7 +46,7 @@ def prepare_data(dataset, vocab, lowercase=False, with_answers=False, wiq_conten
     else:
         thistokenize = tokenize
 
-    corpus = {"support": [], "question": [], "id": []}
+    corpus = {"support": [], "question": [], "id": [],"slot":[]}
     for d in dataset:
         if isinstance(d, QASetting):
             qa_setting = d
@@ -39,10 +55,14 @@ def prepare_data(dataset, vocab, lowercase=False, with_answers=False, wiq_conten
 
         if lowercase:
             corpus["support"].append(" ".join(qa_setting.support).lower())
-            corpus["question"].append(qa_setting.question.lower())
+            question,slot=qa_setting.question.lower().split('\t')
+            corpus["question"].append(question)
+            corpus["slot"].append(slot)
         else:
             corpus["support"].append(" ".join(qa_setting.support))
-            corpus["question"].append(qa_setting.question)
+            question,slot=qa_setting.question.split('\t')
+            corpus["question"].append(question)
+            corpus["slot"].append(int(slot))
         corpus["id"].append(qa_setting.id)
         assert qa_setting.id != None
 
@@ -64,6 +84,13 @@ def prepare_data(dataset, vocab, lowercase=False, with_answers=False, wiq_conten
                 wiq.append(float(any(token.lemma == t2.lemma for t2 in q) and
                                  (not wiq_contentword or (token.orth_.isalnum() and not token.is_stop))))
             else:
+                '''
+                try:
+                    max_sim=max_similarity(vocab.emb.lookup,token,q,default_vec)
+                    wiq.append(max_sim)
+                except:
+                    wiq.append(0)
+                '''
                 wiq.append(float(token in q and (not wiq_contentword or token.isalnum())))
         word_in_question.append(wiq)
 
@@ -132,7 +159,7 @@ def prepare_data(dataset, vocab, lowercase=False, with_answers=False, wiq_conten
 
     return corpus_tokenized["question"], corpus_ids["question"], question_lengths, \
            corpus_tokenized["support"], corpus_ids["support"], support_lengths, \
-           word_in_question, token_offsets, answer_spans, corpus["id"]
+           word_in_question, token_offsets, answer_spans, corpus["id"],corpus["slot"]
 
 
 def unique_words_with_chars(q_tokenized, s_tokenized, char_vocab, indices=None, char_limit=20):

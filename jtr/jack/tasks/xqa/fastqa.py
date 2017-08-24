@@ -54,7 +54,9 @@ class FastQAInputModule(InputModule):
                 XQAPorts.unique_word_chars, XQAPorts.unique_word_char_length,
                 XQAPorts.question_words2unique, XQAPorts.support_words2unique,
                 # features
+                
                 XQAPorts.word_in_question,
+                XQAPorts.slot_list,
                 # optional, only during training
                 XQAPorts.correct_start_training, XQAPorts.answer2question_training,
                 XQAPorts.keep_prob, XQAPorts.is_eval,
@@ -69,7 +71,7 @@ class FastQAInputModule(InputModule):
     def dataset_generator(self, dataset: List[Tuple[QASetting, List[Answer]]], is_eval: bool) \
             -> Iterable[Mapping[TensorPort, np.ndarray]]:
         q_tokenized, q_ids, q_lengths, s_tokenized, s_ids, s_lengths, \
-        word_in_question, token_offsets, answer_spans, sample_ids = \
+        word_in_question, token_offsets, answer_spans, sample_ids,slot = \
             prepare_data(dataset, self.vocab, self.config.get("lowercase", False), with_answers=True,
                          max_support_length=self.config.get("max_support_length", None))
 
@@ -85,6 +87,7 @@ class FastQAInputModule(InputModule):
                 question_lengths = list()
                 wiq = list()
                 spans = list()
+                slot_list=[]
                 span2question = []
                 offsets = []
                 batchqs = []
@@ -109,7 +112,7 @@ class FastQAInputModule(InputModule):
                     span2question.extend(i for _ in answer_spans[j])
                     wiq.append(word_in_question[j])
                     offsets.append(token_offsets[j])
-
+                    slot_list.append(slot[j])
                 batch_size = len(question_lengths)
                 output = {
                     XQAPorts.unique_word_chars: unique_words,
@@ -128,6 +131,7 @@ class FastQAInputModule(InputModule):
                     XQAPorts.keep_prob: 1.0 if is_eval else 1 - self.dropout,
                     XQAPorts.is_eval: is_eval,
                     XQAPorts.token_char_offsets: offsets,
+                    XQAPorts.slot_list:slot_list,
                     Ports.Input.question: batchqs,
                     Ports.Input.sample_id: samp_ids
                 }
@@ -135,7 +139,8 @@ class FastQAInputModule(InputModule):
                 # we can only numpify in here, because bucketing is not possible prior
                 batch = numpify(output, keys=[XQAPorts.unique_word_chars,
                                               XQAPorts.question_words2unique, XQAPorts.support_words2unique,
-                                              XQAPorts.word_in_question, XQAPorts.token_char_offsets,
+                                              XQAPorts.word_in_question,XQAPorts.slot_list, XQAPorts.token_char_offsets,
+                                              XQAPorts.slot_list,
                                               Ports.Input.question])
                 todo = todo[self.batch_size:]
                 yield batch
@@ -144,7 +149,7 @@ class FastQAInputModule(InputModule):
 
     def __call__(self, qa_settings: List[QASetting]) -> Mapping[TensorPort, np.ndarray]:
         q_tokenized, q_ids, q_lengths, s_tokenized, s_ids, s_lengths, \
-        word_in_question, token_offsets, answer_spans = prepare_data(qa_settings, self.vocab,
+        word_in_question, token_offsets, answer_spans,slot= prepare_data(qa_settings, self.vocab,
                                                                      self.config.get("lowercase", False),
                                                                      with_answers=False)
 
@@ -154,7 +159,7 @@ class FastQAInputModule(InputModule):
         batch_size = len(qa_settings)
         emb_supports = np.zeros([batch_size, max(s_lengths), self.emb_matrix.shape[1]])
         emb_questions = np.zeros([batch_size, max(q_lengths), self.emb_matrix.shape[1]])
-
+        
         for i, q in enumerate(q_ids):
             for k, v in enumerate(s_ids[i]):
                 emb_supports[i, k] = self._get_emb(v)
@@ -170,6 +175,7 @@ class FastQAInputModule(InputModule):
             XQAPorts.support_length: s_lengths,
             XQAPorts.emb_question: emb_questions,
             XQAPorts.question_length: q_lengths,
+            XQAPorts.slot_list:slot,
             XQAPorts.word_in_question: word_in_question,
             XQAPorts.token_char_offsets: token_offsets,
             Ports.Input.question: q_ids
@@ -177,7 +183,7 @@ class FastQAInputModule(InputModule):
 
         output = numpify(output, keys=[XQAPorts.unique_word_chars, XQAPorts.question_words2unique,
                                        XQAPorts.support_words2unique, XQAPorts.word_in_question,
-                                       XQAPorts.token_char_offsets,
+                                       XQAPorts.token_char_offsets,XQAPorts.slot_list,
                                        Ports.Input.question])
 
         return output
@@ -191,6 +197,7 @@ fastqa_like_model_module_factory = simple_model_module(
                  XQAPorts.question_words2unique, XQAPorts.support_words2unique,
                  # feature input
                  XQAPorts.word_in_question,
+                 XQAPorts.slot_list,
                  # optional input, provided only during training
                  XQAPorts.correct_start_training, XQAPorts.answer2question_training,
                  XQAPorts.keep_prob, XQAPorts.is_eval],
@@ -214,7 +221,7 @@ def fastqa_model(shared_vocab_config, emb_question, question_length,
                  emb_support, support_length,
                  unique_word_chars, unique_word_char_length,
                  question_words2unique, support_words2unique,
-                 word_in_question,
+                 word_in_question,slot_list,
                  correct_start, answer2question, keep_prob, is_eval):
     """
     fast_qa model
@@ -247,11 +254,15 @@ def fastqa_model(shared_vocab_config, emb_question, question_length,
         input_size = shared_vocab_config.config["repr_dim_input"]
         size = shared_vocab_config.config["repr_dim"]
         with_char_embeddings = shared_vocab_config.config.get("with_char_embeddings", False)
-
+        
         # set shapes for inputs
         emb_question.set_shape([None, None, input_size])
         emb_support.set_shape([None, None, input_size])
-
+        #slot embedding part
+        slot_embeddings = tf.get_variable("slot_embeddings",
+                                          [64, size])
+        embedded_slot_ids = tf.gather(slot_embeddings, slot_list)
+        
         if with_char_embeddings:
             # compute combined embeddings
             [char_emb_question, char_emb_support] = conv_char_embedding_alt(shared_vocab_config.config["char_vocab"],
@@ -322,7 +333,7 @@ def fastqa_model(shared_vocab_config, emb_question, question_length,
 
         start_scores, end_scores, predicted_start_pointer, predicted_end_pointer = \
             fastqa_answer_layer(size, encoded_question, question_length, encoded_support, support_length,
-                                correct_start, answer2question, is_eval,
+                                correct_start, answer2question, is_eval,embedded_slot_ids,
                                 beam_size=shared_vocab_config.config.get("beam_size", 1))
 
         span = tf.concat([tf.expand_dims(predicted_start_pointer, 1), tf.expand_dims(predicted_end_pointer, 1)], 1)
@@ -332,7 +343,7 @@ def fastqa_model(shared_vocab_config, emb_question, question_length,
 
 # ANSWER LAYER
 def fastqa_answer_layer(size, encoded_question, question_length, encoded_support, support_length,
-                        correct_start, answer2question, is_eval, beam_size=1):
+                        correct_start, answer2question, is_eval, embedded_slot_ids, beam_size=1):
     beam_size = tf.cond(is_eval, lambda: tf.constant(beam_size, tf.int32), lambda: tf.constant(1, tf.int32))
     batch_size = tf.shape(question_length)[0]
     answer2question = tf.cond(is_eval, lambda: tf.range(0, batch_size, dtype=tf.int32), lambda: answer2question)
@@ -349,10 +360,18 @@ def fastqa_answer_layer(size, encoded_question, question_length, encoded_support
     attention_scores = attention_scores + tf.expand_dims(q_mask, 2)
     question_attention_weights = tf.nn.softmax(attention_scores, 1, name="question_attention_weights")
     question_state = tf.reduce_sum(question_attention_weights * encoded_question, [1])
-
+    
+    slot_q_state=tf.concat([tf.expand_dims(question_state,dim=1),tf.expand_dims(embedded_slot_ids,dim=1)],1)
+    attention_scores2 = tf.contrib.layers.fully_connected(slot_q_state, 1,
+                                                         activation_fn=None,
+                                                         weights_initializer=None,
+                                                         biases_initializer=None,
+                                                         scope="slot_question_attention")
+    slot_question_attention_weights = tf.nn.softmax(attention_scores2, 1, name="slot_question_attention_weights")
+    slot_question_state = tf.reduce_sum(slot_question_attention_weights * slot_q_state, [1])
     # Prediction
     # start
-    start_input = tf.concat([tf.expand_dims(question_state, 1) * encoded_support,
+    start_input = tf.concat([tf.expand_dims(slot_question_state, 1) * encoded_support,
                              encoded_support], 2)
 
     q_start_inter = tf.contrib.layers.fully_connected(question_state, size,
